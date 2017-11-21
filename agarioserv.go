@@ -8,21 +8,21 @@ package main
 
 import (
 	"flag"
-	"html/template"
 	"log"
 	"net/http"
 	"fmt"
 	"github.com/gorilla/websocket"
 )
 
+const maxConn = 1000
 var addr = flag.String("addr", "localhost:9002", "http service address")
 
 var upgrader = websocket.Upgrader{} // use default options
 var index = 0
 var connections = make([]*websocket.Conn, 0)
-var posx = make([]float32, 1000)
-var posy = make([]float32, 1000)
-var killedby = make([]int, 1000)
+var posx = make([]float32, maxConn)
+var posy = make([]float32, maxConn)
+var killedby = make([]int, maxConn)
 func home(w http.ResponseWriter, r *http.Request) {
 	c, err := upgrader.Upgrade(w, r, nil)
 	connections=append(connections,c)
@@ -34,8 +34,16 @@ func home(w http.ResponseWriter, r *http.Request) {
 	c.WriteMessage(websocket.TextMessage,[]byte(fmt.Sprintf("%d C", index)));
 	var myid = index
 	index++
+	for i := 0; i < maxConn; i++ {
+		if (posx[i]!=0||posy[i]!=0) {
+			c.WriteMessage(websocket.TextMessage,[]byte(fmt.Sprintf("%d P %f %f", i,posx[i],posy[i])));
+		}
+		if (killedby[i]>=0) {
+			c.WriteMessage(websocket.TextMessage,[]byte(fmt.Sprintf("%d I %d", killedby[i], i)));
+		}
+	}
 	for {
-		_, message, err := c.ReadMessage() //_=mt
+		_, message, err := c.ReadMessage() //_=message type
 		if err != nil {
 			log.Println("read:", err)
 			break
@@ -56,12 +64,10 @@ func home(w http.ResponseWriter, r *http.Request) {
 			fmt.Sscanf(string(message),"%d%s%d",&killed)
 			killedby[killed] = id;
 		}
-		log.Printf("recv: %s", message)
 		for i:=0; i<len(connections); i++ {
 			if (i==myid) {
 				continue
 			}
-			fmt.Printf("Notifying %d\n",i);
 			err = connections[i].WriteMessage(websocket.TextMessage, message)
 			if err != nil {
 				log.Println("Error:", err)
@@ -70,91 +76,14 @@ func home(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	upgrader.Upgrade(w, r, nil)
-	//homeTemplate.Execute(w, "ws://"+r.Host+"/echo")
 }
 
 func main() {
+	for i := 0; i < maxConn; i++ {
+		killedby[i] = -1
+    }
 	flag.Parse()
 	log.SetFlags(0)
 	http.HandleFunc("/", home)
 	log.Fatal(http.ListenAndServe(*addr, nil))
 }
-
-var homeTemplate = template.Must(template.New("").Parse(`
-<!DOCTYPE html>
-<html>
-<head>
-<meta charset="utf-8">
-<script>  
-window.addEventListener("load", function(evt) {
-
-    var output = document.getElementById("output");
-    var input = document.getElementById("input");
-    var ws;
-
-    var print = function(message) {
-        var d = document.createElement("div");
-        d.innerHTML = message;
-        output.appendChild(d);
-    };
-
-    document.getElementById("open").onclick = function(evt) {
-        if (ws) {
-            return false;
-        }
-        ws = new WebSocket("{{.}}");
-        ws.onopen = function(evt) {
-            print("OPEN");
-        }
-        ws.onclose = function(evt) {
-            print("CLOSE");
-            ws = null;
-        }
-        ws.onmessage = function(evt) {
-            print("RESPONSE: " + evt.data);
-        }
-        ws.onerror = function(evt) {
-            print("ERROR: " + evt.data);
-        }
-        return false;
-    };
-
-    document.getElementById("send").onclick = function(evt) {
-        if (!ws) {
-            return false;
-        }
-        print("SEND: " + input.value);
-        ws.send(input.value);
-        return false;
-    };
-
-    document.getElementById("close").onclick = function(evt) {
-        if (!ws) {
-            return false;
-        }
-        ws.close();
-        return false;
-    };
-
-});
-</script>
-</head>
-<body>
-<table>
-<tr><td valign="top" width="50%">
-<p>Click "Open" to create a connection to the server, 
-"Send" to send a message to the server and "Close" to close the connection. 
-You can change the message and send multiple times.
-<p>
-<form>
-<button id="open">Open</button>
-<button id="close">Close</button>
-<p><input id="input" type="text" value="Hello world!">
-<button id="send">Send</button>
-</form>
-</td><td valign="top" width="50%">
-<div id="output"></div>
-</td></tr></table>
-</body>
-</html>
-`))
