@@ -23,6 +23,7 @@ var connections = make([]*websocket.Conn, 0)
 var posx = make([]float32, maxConn)
 var posy = make([]float32, maxConn)
 var killedby = make([]int, maxConn)
+var dead = make([]bool, maxConn)
 func home(w http.ResponseWriter, r *http.Request) {
 	c, err := upgrader.Upgrade(w, r, nil)
 	connections=append(connections,c)
@@ -50,12 +51,12 @@ func home(w http.ResponseWriter, r *http.Request) {
 		}
 		var id int
 		var op string
+		fmt.Printf("%s\n",string(message));
 		fmt.Sscanf(string(message),"%d%s",&id,&op)
 		if (op == "P") {
 			var x float32
 			var y float32
 			fmt.Sscanf(string(message),"%d%s%f%f",&id,&op,&x,&y)
-			fmt.Printf("\n%d:%s:%f:%f\n",id,op,x,y);
 			posx[id] = x;
 			posy[id] = y;
 		}
@@ -65,7 +66,7 @@ func home(w http.ResponseWriter, r *http.Request) {
 			killedby[killed] = id;
 		}
 		for i:=0; i<len(connections); i++ {
-			if (i==myid) {
+			if (i==myid||dead[i]) {
 				continue
 			}
 			err = connections[i].WriteMessage(websocket.TextMessage, message)
@@ -75,7 +76,7 @@ func home(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 	}
-	upgrader.Upgrade(w, r, nil)
+	dead[myid] = true
 }
 
 func main() {
