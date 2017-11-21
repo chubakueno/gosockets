@@ -11,56 +11,62 @@ import (
 	"html/template"
 	"log"
 	"net/http"
-
+	"fmt"
 	"github.com/gorilla/websocket"
 )
 
 var addr = flag.String("addr", "localhost:9002", "http service address")
 
 var upgrader = websocket.Upgrader{} // use default options
-
-func echo(w http.ResponseWriter, r *http.Request) {
-	print("echo")
-	c, err := upgrader.Upgrade(w, r, nil)
-	if err != nil {
-		log.Print("upgrade:", err)
-		return
-	}
-	defer c.Close()
-	for {
-		mt, message, err := c.ReadMessage()
-		if err != nil {
-			log.Println("read:", err)
-			break
-		}
-		log.Printf("recv: %s", message)
-		err = c.WriteMessage(mt, message)
-		if err != nil {
-			log.Println("write:", err)
-			break
-		}
-	}
-}
-
+var index = 0
+var connections = make([]*websocket.Conn, 0)
+var posx = make([]float32, 1000)
+var posy = make([]float32, 1000)
+var killedby = make([]int, 1000)
 func home(w http.ResponseWriter, r *http.Request) {
 	c, err := upgrader.Upgrade(w, r, nil)
+	connections=append(connections,c)
 	if err != nil {
 		log.Print("upgrade:", err)
 		return
 	}
 	defer c.Close()
-	c.WriteMessage(mt,"0 C");
+	c.WriteMessage(websocket.TextMessage,[]byte(fmt.Sprintf("%d C", index)));
+	var myid = index
+	index++
 	for {
-		mt, message, err := c.ReadMessage()
+		_, message, err := c.ReadMessage() //_=mt
 		if err != nil {
 			log.Println("read:", err)
 			break
 		}
+		var id int
+		var op string
+		fmt.Sscanf(string(message),"%d%s",&id,&op)
+		if (op == "P") {
+			var x float32
+			var y float32
+			fmt.Sscanf(string(message),"%d%s%f%f",&id,&op,&x,&y)
+			fmt.Printf("\n%d:%s:%f:%f\n",id,op,x,y);
+			posx[id] = x;
+			posy[id] = y;
+		}
+		if (op == "I") {
+			var killed int
+			fmt.Sscanf(string(message),"%d%s%d",&killed)
+			killedby[killed] = id;
+		}
 		log.Printf("recv: %s", message)
-		err = c.WriteMessage(mt, message)
-		if err != nil {
-			log.Println("write:", err)
-			break
+		for i:=0; i<len(connections); i++ {
+			if (i==myid) {
+				continue
+			}
+			fmt.Printf("Notifying %d\n",i);
+			err = connections[i].WriteMessage(websocket.TextMessage, message)
+			if err != nil {
+				log.Println("Error:", err)
+				break
+			}
 		}
 	}
 	upgrader.Upgrade(w, r, nil)
@@ -70,7 +76,6 @@ func home(w http.ResponseWriter, r *http.Request) {
 func main() {
 	flag.Parse()
 	log.SetFlags(0)
-	http.HandleFunc("/echo", echo)
 	http.HandleFunc("/", home)
 	log.Fatal(http.ListenAndServe(*addr, nil))
 }
